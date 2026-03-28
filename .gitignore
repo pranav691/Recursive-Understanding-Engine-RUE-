@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+.env
+venv/
+.venv/
+
+# Database (don't expose user data)
+backend/rue_history.db
+
+# Node
+frontend/node_modules/
+frontend/dist/
