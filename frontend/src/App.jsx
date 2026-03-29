@@ -1,4 +1,3 @@
-
 const API_URL = import.meta.env.VITE_API_URL;
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
@@ -6,182 +5,6 @@ import ExplorationNode from './components/ExplorationNode'
 import HistorySidebar from './components/HistorySidebar'
 import PathSidebar from './components/PathSidebar'
 import FeynmanPage from './pages/FeynmanPage'
-
-// ── Session clarity metrics ───────────────────────────────────────────────────
-
-const DIFFICULTY_WEIGHTS = { hard: 3, medium: 2, easy: 1 }
-
-function computeSessionMetrics(stack) {
-const questionNode = stack[0]
-if (!questionNode?.terms?.length || stack.length < 2) return null
-
-const terms = questionNode.terms
-.map((t) => (typeof t === 'string' ? { term: t, difficulty: 'medium' } : t))
-.filter((t) => t.term)
-
-const totalTerms = terms.length
-if (totalTerms === 0) return null
-
-const exploredTitles = new Set(stack.slice(1).map((n) => n.title?.toLowerCase()))
-const depth = stack.length - 1
-
-let totalSqWeight = 0
-let exploredSqWeight = 0
-let exploredCount = 0
-
-terms.forEach(({ term, difficulty }) => {
-const w = DIFFICULTY_WEIGHTS[difficulty] ?? 2
-const w2 = w * w
-totalSqWeight += w2
-if (exploredTitles.has(term.toLowerCase())) {
-exploredSqWeight += w2
-exploredCount++
-}
-})
-
-const missedSqWeight = totalSqWeight - exploredSqWeight
-const weightedClarity = totalSqWeight > 0 ? 1 - missedSqWeight / totalSqWeight : 0
-
-const depthFactor = depth / (depth + 2)
-const breadthFactor = Math.sqrt(exploredCount / totalTerms)
-const depthClarity = breadthFactor * depthFactor
-
-return {
-weightedClarity: Math.min(weightedClarity, 1.0),
-depthClarity: Math.min(depthClarity, 1.0),
-}
-}
-
-// ── API helpers ───────────────────────────────────────────────────────────────
-
-async function apiAskStream(question, onToken, onConcepts, onError) {
-const res = await fetch(`${API_URL}/api/ask/stream`, {
-method: 'POST',
-headers: { 'Content-Type': 'application/json' },
-body: JSON.stringify({ question }),
-})
-if (!res.ok) { onError('Server error ' + res.status); return }
-
-const reader = res.body.getReader()
-const decoder = new TextDecoder()
-
-while (true) {
-const { done, value } = await reader.read()
-if (done) break
-const lines = decoder.decode(value, { stream: true }).split('\n')
-for (const line of lines) {
-if (!line.startsWith('data: ')) continue
-try {
-const event = JSON.parse(line.slice(6))
-if (event.type === 'token') onToken(event.content)
-else if (event.type === 'concepts') onConcepts(event.terms)
-else if (event.type === 'error') onError(event.message)
-} catch (_) {}
-}
-}
-}
-
-async function apiExplore(term, context) {
-const res = await fetch(`${API_URL}/api/explore`, {
-method: 'POST',
-headers: { 'Content-Type': 'application/json' },
-body: JSON.stringify({ term, context }),
-})
-if (!res.ok) throw new Error('Failed')
-return res.json()
-}
-
-async function apiSaveSession(question, stack, existingId = null, isBranch = false, rootQuestion = '', metrics = null) {
-const url = existingId
-? `${API_URL}/api/history/${existingId}`
-: `${API_URL}/api/history`
-
-const method = existingId ? 'PUT' : 'POST'
-
-const res = await fetch(url, {
-method,
-headers: { 'Content-Type': 'application/json' },
-body: JSON.stringify({
-question,
-stack,
-is_branch: isBranch,
-root_question: rootQuestion,
-weighted_clarity: metrics?.weightedClarity ?? 0.0,
-depth_clarity: metrics?.depthClarity ?? 0.0,
-}),
-})
-if (!res.ok) throw new Error('Failed to save')
-return res.json()
-}
-
-async function apiGetHistory() {
-const res = await fetch(`${API_URL}/api/history?is_branch=0`)
-if (!res.ok) throw new Error('Failed to load history')
-return res.json()
-}
-
-async function apiGetBranches(rootQuestion) {
-const res = await fetch(`${API_URL}/api/history?is_branch=1&root_question=${encodeURIComponent(rootQuestion)}`)
-if (!res.ok) throw new Error('Failed to load branches')
-return res.json()
-}
-
-async function apiGetSession(id) {
-const res = await fetch(`${API_URL}/api/history/${id}`)
-if (!res.ok) throw new Error('Session not found')
-return res.json()
-}
-
-async function apiDeleteSession(id) {
-await fetch(`${API_URL}/api/history/${id}`, { method: 'DELETE' })
-}
-
-async function apiDeleteBranchesForQuestion(rootQuestion) {
-await fetch(`${API_URL}/api/history?root_question=${encodeURIComponent(rootQuestion)}`, { method: 'DELETE' })
-}
-
-async function apiSimplify(content, title) {
-const res = await fetch(`${API_URL}/api/simplify`, {
-method: 'POST',
-headers: { 'Content-Type': 'application/json' },
-body: JSON.stringify({ content, title }),
-})
-if (!res.ok) throw new Error('Failed to simplify')
-return res.json()
-}
-
-// ── App (UNCHANGED BELOW) ─────────────────────────────────────────────────────
-
-export default function App() {
-const [input, setInput] = useState('')
-const [stack, setStack] = useState([])
-const [isLoading, setIsLoading] = useState(false)
-const [error, setError] = useState(null)
-const [history, setHistory] = useState([])
-const [branches, setBranches] = useState([])
-const [activeHistoryId, setActiveHistoryId] = useState(null)
-const [saved, setSaved] = useState(false)
-const [feynmanMode, setFeynmanMode] = useState(null)
-
-const bottomRef = useRef(null)
-const inputRef = useRef(null)
-const currentBranchIdRef = useRef(null)
-
-const hasStarted = stack.length > 0
-const canUnderstand = stack.filter((n) => n.type === 'term' && !n.loading).length >= 1
-const sessionMetrics = useMemo(() => computeSessionMetrics(stack), [stack])
-
-const refreshHistory = useCallback(async () => {
-try {
-const data = await apiGetHistory()
-setHistory(data)
-} catch {}
-}, [])
-
-useEffect(() => { refreshHistory() }, [refreshHistory])
-
-// ... REST OF YOUR ORIGINAL FILE CONTINUES EXACTLY SAME ...
-}
 
 // ── Session clarity metrics ───────────────────────────────────────────────────
 
@@ -235,46 +58,69 @@ function computeSessionMetrics(stack) {
 // ── API helpers ───────────────────────────────────────────────────────────────
 
 // Streaming answer via SSE — calls onToken for each chunk, onConcepts when done
+
 async function apiAskStream(question, onToken, onConcepts, onError) {
-  const res = await fetch('/api/ask/stream', {
+  const res = await fetch(`${API_URL}/api/ask/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ question }),
   })
-  if (!res.ok) { onError('Server error ' + res.status); return }
 
+  if (!res.ok) {
+    onError('Server error ' + res.status)
+    return
+  }
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
-
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
+
     const lines = decoder.decode(value, { stream: true }).split('\n')
+
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue
+
       try {
         const event = JSON.parse(line.slice(6))
+
         if (event.type === 'token') onToken(event.content)
         else if (event.type === 'concepts') onConcepts(event.terms)
         else if (event.type === 'error') onError(event.message)
-      } catch (_) { /* skip malformed lines */ }
+
+      } catch (_) {}
     }
   }
 }
 
 async function apiExplore(term, context) {
-  const res = await fetch('/api/explore', {
+  const res = await fetch(`${API_URL}/api/explore`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ term, context }),
   })
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Failed')
+  if (!res.ok) {
+    throw new Error(
+      (await res.json().catch(() => ({}))).detail || 'Failed'
+    )
+  }
   return res.json()
 }
 
-async function apiSaveSession(question, stack, existingId = null, isBranch = false, rootQuestion = '', metrics = null) {
-  const url = existingId ? `/api/history/${existingId}` : '/api/history'
+async function apiSaveSession(
+  question,
+  stack,
+  existingId = null,
+  isBranch = false,
+  rootQuestion = '',
+  metrics
+) {
+  const url = existingId
+    ? `${API_URL}/api/history/${existingId}`
+    : `${API_URL}/api/history`
+
   const method = existingId ? 'PUT' : 'POST'
+
   const res = await fetch(url, {
     method,
     headers: { 'Content-Type': 'application/json' },
@@ -287,40 +133,42 @@ async function apiSaveSession(question, stack, existingId = null, isBranch = fal
       depth_clarity: metrics?.depthClarity ?? 0.0,
     }),
   })
+
   if (!res.ok) throw new Error('Failed to save')
+
   return res.json()
 }
 
 // Main history — only non-branch sessions (saved via "I Understand!")
 async function apiGetHistory() {
-  const res = await fetch('/api/history?is_branch=0')
+  const res = await fetch(`${API_URL}/api/history?is_branch=0`)
   if (!res.ok) throw new Error('Failed to load history')
   return res.json()
 }
 
 // Branch paths saved under a root question
 async function apiGetBranches(rootQuestion) {
-  const res = await fetch(`/api/history?is_branch=1&root_question=${encodeURIComponent(rootQuestion)}`)
+  const res = await fetch(`${API_URL}/api/history?is_branch=1&root_question=${encodeURIComponent(rootQuestion)}`)
   if (!res.ok) throw new Error('Failed to load branches')
   return res.json()
 }
 
 async function apiGetSession(id) {
-  const res = await fetch(`/api/history/${id}`)
+  const res = await fetch(`${API_URL}/api/history/${id}`)
   if (!res.ok) throw new Error('Session not found')
   return res.json()
 }
 
 async function apiDeleteSession(id) {
-  await fetch(`/api/history/${id}`, { method: 'DELETE' })
+  await fetch(`${API_URL}/api/history/${id}`, { method: 'DELETE' })
 }
 
 async function apiDeleteBranchesForQuestion(rootQuestion) {
-  await fetch(`/api/history?root_question=${encodeURIComponent(rootQuestion)}`, { method: 'DELETE' })
+  await fetch(`${API_URL}/api/history?root_question=${encodeURIComponent(rootQuestion)}`, { method: 'DELETE' })
 }
 
 async function apiSimplify(content, title) {
-  const res = await fetch('/api/simplify', {
+  const res = await fetch(`${API_URL}/api/simplify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content, title }),
