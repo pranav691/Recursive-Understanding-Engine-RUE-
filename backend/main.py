@@ -14,7 +14,7 @@ app = FastAPI(title="RUE - Recursive Understanding Engine")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://recursive-understanding-engine-rue-seven.vercel.app/"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
