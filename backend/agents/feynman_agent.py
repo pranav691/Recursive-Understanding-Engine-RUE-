@@ -41,8 +41,8 @@ async def _generate_qa_for_node(i, node):
                 "type": node.get("type", "term"),
                 "questions": questions[:2],
             }
-    except Exception:
-        pass
+    except Exception as e:
+        print("Feynman QA error:", str(e))
     return None
 
 
@@ -70,8 +70,8 @@ async def _generate_mcq_for_node(i, node):
                 "type": node.get("type", "term"),
                 "mcqs": mcqs[:5],
             }
-    except Exception:
-        pass
+    except Exception as e:
+        print("Feynman QA error:", str(e))
     return None
 
 
